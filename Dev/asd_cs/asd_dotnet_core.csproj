@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netcoreapp2.1</TargetFramework>
+    <Platforms>AnyCPU;x86</Platforms>
+    <RootNamespace>asd</RootNamespace>
+    <Product></Product>
+    <Company />
+    <Authors />
+    <Copyright></Copyright>
+    <Description>Game Engine Library</Description>
+    <PackageId />
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo> 
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <DefineConstants>TRACE;DEBUG</DefineConstants>
+    <AssemblyName>Altseed</AssemblyName>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x86'">
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <WarningsAsErrors />
+    <NoWarn />
+    <OutputPath>..\bin\</OutputPath>
+    <DocumentationFile>..\bin\Altseed.xml</DocumentationFile>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x86'">
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <NoWarn />
+    <OutputPath>..\bin\</OutputPath>
+    <DocumentationFile>..\bin\Altseed.xml</DocumentationFile>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <WarningsAsErrors />
+    <DefineConstants>TRACE</DefineConstants>
+  </PropertyGroup>
+
+</Project>

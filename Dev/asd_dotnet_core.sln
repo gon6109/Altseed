@@ -1,0 +1,31 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 15
+VisualStudioVersion = 15.0.28307.136
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "asd_dotnet_core", "asd_cs\asd_dotnet_core.csproj", "{F0E0F555-536F-416F-8A72-1ED2F999B959}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Debug|x86 = Debug|x86
+		Release|Any CPU = Release|Any CPU
+		Release|x86 = Release|x86
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{F0E0F555-536F-416F-8A72-1ED2F999B959}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F0E0F555-536F-416F-8A72-1ED2F999B959}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F0E0F555-536F-416F-8A72-1ED2F999B959}.Debug|x86.ActiveCfg = Debug|x86
+		{F0E0F555-536F-416F-8A72-1ED2F999B959}.Debug|x86.Build.0 = Debug|x86
+		{F0E0F555-536F-416F-8A72-1ED2F999B959}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F0E0F555-536F-416F-8A72-1ED2F999B959}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F0E0F555-536F-416F-8A72-1ED2F999B959}.Release|x86.ActiveCfg = Release|x86
+		{F0E0F555-536F-416F-8A72-1ED2F999B959}.Release|x86.Build.0 = Release|x86
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {5D63C49C-4962-425C-B94A-92FEFC1E9585}
+	EndGlobalSection
+EndGlobal
