@@ -8,8 +8,6 @@
 #include "../IO/asd.StaticFile.h"
 
 #include <functional>
-#include <mutex>
-#include <thread>
 #include <time.h>
 
 #if defined(_WIN32)
@@ -42,19 +40,9 @@ private:
 	std::map<RESOURCE*, std::shared_ptr<LoadingInformation>> loadInfo;
 
 	File* file;
-	std::mutex mtx;
-	std::thread loadThread;
 
 public:
 	ResourceContainer(File* file) : file(file) {}
-
-	~ResourceContainer()
-	{
-		if (loadThread.joinable())
-		{
-			loadThread.detach();
-		}
-	}
 
 	const std::map<astring, RESOURCE*>& GetAllResources() { return keyToResource; }
 
@@ -82,8 +70,6 @@ public:
 		auto staticFile = file->CreateStaticFile(path);
 		if (staticFile == nullptr)
 			return nullptr;
-
-		std::lock_guard<std::mutex> lock(this->mtx);
 
 		auto ret = loadFunc((uint8_t*)staticFile->GetData(), staticFile->GetSize());
 
@@ -135,12 +121,7 @@ public:
 			return nullptr;
 		}
 
-		loadThread = std::thread([this, ret, &staticFile, loadFunc, path]() {
-			while (staticFile->GetLoadState() == LoadState::Loading || staticFile->GetLoadState() == LoadState::WaitSync)
-			{
-				std::this_thread::sleep_for(std::chrono::milliseconds(10));
-			}
-			std::lock_guard<std::mutex> lock(this->mtx);
+		((File_Imp*)file)->GetSynchronoizer()->Start((StaticFile_Imp*)staticFile, [this, ret, staticFile, loadFunc, path]() {
 
 			if (!loadFunc(ret, (uint8_t*)staticFile->GetData(), staticFile->GetSize()))
 				return;
@@ -153,7 +134,7 @@ public:
 				info->ModifiedTime = GetModifiedTime(path_);
 				info->LoadedPath = path_;
 			}
-			SafeRelease(staticFile);
+			staticFile->Release();
 
 			info->ResourcePtr = ret;
 
@@ -177,8 +158,6 @@ public:
 		auto staticFile = file->CreateStaticFile(path);
 		if (staticFile == nullptr)
 			return nullptr;
-
-		std::lock_guard<std::mutex> lock(this->mtx);
 
 		auto ret = loadFunc(staticFile->GetBuffer());
 
@@ -206,7 +185,6 @@ public:
 
 	void Register(const achar* key, RESOURCE* target, std::shared_ptr<LoadingInformation> info = nullptr)
 	{
-		std::lock_guard<std::mutex> lock(mtx);
 		keyToResource[key] = target;
 		resourceToKeys[target] = key;
 
@@ -218,7 +196,6 @@ public:
 
 	void Unregister(RESOURCE* target)
 	{
-		std::lock_guard<std::mutex> lock(mtx);
 		keyToResource.erase(resourceToKeys[target]);
 		resourceToKeys.erase(target);
 		loadInfo.erase(target);

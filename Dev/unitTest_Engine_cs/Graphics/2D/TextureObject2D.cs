@@ -9,7 +9,7 @@ namespace unitTest_Engine_cs.Graphics._2D
     class TextureObject2D : EngineTest
     {
         public TextureObject2D()
-            : base(20)
+            : base(100)
         {
         }
 
@@ -17,7 +17,7 @@ namespace unitTest_Engine_cs.Graphics._2D
         {
             var scene = new asd.Scene();
             var layer = new asd.Layer2D();
-            var texture = asd.Engine.Graphics.CreateTexture2D("Data/Texture/Sample1.png");
+            var texture = asd.Engine.Graphics.CreateTexture2DAsync("Data/Texture/Sample1.png");
             var textureObj1 = new asd.TextureObject2D();
             var textureObj2 = new asd.TextureObject2D();
 
@@ -28,7 +28,7 @@ namespace unitTest_Engine_cs.Graphics._2D
 
             textureObj1.Texture = texture;
             textureObj1.Src = new asd.RectF(256, 256, 256, 256);
-            textureObj1.Position=new asd.Vector2DF(320, 240);
+            textureObj1.Position = new asd.Vector2DF(320, 240);
 
             textureObj2.Texture = texture;
             textureObj2.Src = new asd.RectF(0, 0, 256, 256);
@@ -38,7 +38,10 @@ namespace unitTest_Engine_cs.Graphics._2D
 
         protected override void OnUpdating()
         {
-
+            foreach (var item in asd.Engine.CurrentScene.Layers.OfType<asd.Layer2D>().First().Objects.OfType<asd.TextureObject2D>())
+            {
+                Console.Write(item.Texture.LoadState);
+            }
         }
     }
 }
