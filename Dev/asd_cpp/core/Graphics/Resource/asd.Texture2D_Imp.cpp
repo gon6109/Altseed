@@ -125,9 +125,13 @@ bool asd::Texture2D_Imp::Load(uint8_t* data, int32_t size, bool isEditable, bool
 
 	if (rhi->Initialize(((Graphics_Imp*)GetGraphics())->GetRHI(), data, size, isEditable, isSRGB))
 	{
+		this->rhi = rhi; 
 		m_format = (asd::TextureFormat)rhi->GetFormat();
 		m_size = Vector2DI(rhi->GetWidth(), rhi->GetHeight());
 		m_resource.resize(m_size.X * m_size.Y * ImageHelper::GetPitch(m_format));
+
+		auto g = (Graphics_Imp*)GetGraphics();
+		g->IncVRAM(ImageHelper::GetVRAMSize(GetFormat(), GetSize().X, GetSize().Y));
 		m_loadState = LoadState::Loaded;
 		return true;
 	}

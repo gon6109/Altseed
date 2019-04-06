@@ -8,8 +8,8 @@
 #include "../IO/asd.StaticFile.h"
 
 #include <functional>
-#include <thread>
 #include <mutex>
+#include <thread>
 #include <time.h>
 
 #if defined(_WIN32)
@@ -43,9 +43,18 @@ private:
 
 	File* file;
 	std::mutex mtx;
+	std::thread loadThread;
 
 public:
 	ResourceContainer(File* file) : file(file) {}
+
+	~ResourceContainer()
+	{
+		if (loadThread.joinable())
+		{
+			loadThread.detach();
+		}
+	}
 
 	const std::map<astring, RESOURCE*>& GetAllResources() { return keyToResource; }
 
@@ -73,6 +82,8 @@ public:
 		auto staticFile = file->CreateStaticFile(path);
 		if (staticFile == nullptr)
 			return nullptr;
+
+		std::lock_guard<std::mutex> lock(this->mtx);
 
 		auto ret = loadFunc((uint8_t*)staticFile->GetData(), staticFile->GetSize());
 
@@ -124,11 +135,12 @@ public:
 			return nullptr;
 		}
 
-		auto loadThread = std::thread([this, ret, &staticFile, loadFunc, path]() {
-			while (staticFile->GetLoadState() == LoadState::Loading)
+		loadThread = std::thread([this, ret, &staticFile, loadFunc, path]() {
+			while (staticFile->GetLoadState() == LoadState::Loading || staticFile->GetLoadState() == LoadState::WaitSync)
 			{
 				std::this_thread::sleep_for(std::chrono::milliseconds(10));
 			}
+			std::lock_guard<std::mutex> lock(this->mtx);
 
 			if (!loadFunc(ret, (uint8_t*)staticFile->GetData(), staticFile->GetSize()))
 				return;
@@ -141,7 +153,6 @@ public:
 				info->ModifiedTime = GetModifiedTime(path_);
 				info->LoadedPath = path_;
 			}
-			std::lock_guard<std::mutex> lock(this->mtx);
 			SafeRelease(staticFile);
 
 			info->ResourcePtr = ret;
@@ -166,6 +177,8 @@ public:
 		auto staticFile = file->CreateStaticFile(path);
 		if (staticFile == nullptr)
 			return nullptr;
+
+		std::lock_guard<std::mutex> lock(this->mtx);
 
 		auto ret = loadFunc(staticFile->GetBuffer());
 

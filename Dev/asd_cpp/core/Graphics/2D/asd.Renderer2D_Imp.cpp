@@ -9,12 +9,12 @@
 
 #include "../Helper/asd.EffekseerHelper.h"
 
-#include "../Resource/asd.VertexBuffer_Imp.h"
 #include "../Resource/asd.IndexBuffer_Imp.h"
 #include "../Resource/asd.NativeShader_Imp.h"
+#include "../Resource/asd.VertexBuffer_Imp.h"
 
-#include "../Resource/asd.Shader2D_Imp.h"
 #include "../Resource/asd.Material2D_Imp.h"
+#include "../Resource/asd.Shader2D_Imp.h"
 #include "../Resource/asd.ShaderCache.h"
 
 #include "../Resource/asd.Font_Imp.h"
@@ -30,7 +30,7 @@
 #ifdef WIN32
 #ifdef min
 #undef min
-#endif 
+#endif
 #ifdef max
 #undef max
 #endif
@@ -39,711 +39,748 @@
 //----------------------------------------------------------------------------------
 //
 //----------------------------------------------------------------------------------
-namespace asd {
+namespace asd
+{
 
-	static int32_t to_number(char16_t c1)
+static int32_t to_number(char16_t c1)
+{
+	if (u'0' <= c1 && c1 <= u'9')
+		return c1 - u'0';
+	if (u'a' <= c1 && c1 <= u'f')
+		return c1 - u'a';
+	if (u'A' <= c1 && c1 <= u'F')
+		return c1 - u'A';
+	return 0;
+}
+
+//----------------------------------------------------------------------------------
+//
+//----------------------------------------------------------------------------------
+Renderer2D::Renderer2D() {}
+
+//----------------------------------------------------------------------------------
+//
+//----------------------------------------------------------------------------------
+Renderer2D::~Renderer2D() {}
+
+//----------------------------------------------------------------------------------
+//
+//----------------------------------------------------------------------------------
+Renderer2D_Imp::Renderer2D_Imp(Graphics* graphics, Log* log) : m_graphics(nullptr), m_log(nullptr)
+{
+	m_graphics = (Graphics_Imp*)graphics;
+	m_log = log;
+
+	SafeAddRef(graphics);
+
+	m_vertexBuffer = m_graphics->CreateVertexBuffer_Imp(sizeof(SpriteVertex), SpriteCount * 4, true);
+	m_indexBuffer = m_graphics->CreateIndexBuffer_Imp(SpriteCount * 6, false, true);
+
 	{
-		if (u'0' <= c1 && c1 <= u'9') return c1 - u'0';
-		if (u'a' <= c1 && c1 <= u'f') return c1 - u'a';
-		if (u'A' <= c1 && c1 <= u'F') return c1 - u'A';
-		return 0;
-	}
+		m_indexBuffer->Lock();
+		auto ib = m_indexBuffer->GetBuffer<uint32_t>(SpriteCount * 6);
 
-	//----------------------------------------------------------------------------------
-	//
-	//----------------------------------------------------------------------------------
-	Renderer2D::Renderer2D()
-	{
-	}
-
-	//----------------------------------------------------------------------------------
-	//
-	//----------------------------------------------------------------------------------
-	Renderer2D::~Renderer2D()
-	{
-	}
-
-	//----------------------------------------------------------------------------------
-	//
-	//----------------------------------------------------------------------------------
-	Renderer2D_Imp::Renderer2D_Imp(Graphics* graphics, Log* log)
-		: m_graphics(nullptr)
-		, m_log(nullptr)
-	{
-		m_graphics = (Graphics_Imp*) graphics;
-		m_log = log;
-
-		SafeAddRef(graphics);
-
-		m_vertexBuffer = m_graphics->CreateVertexBuffer_Imp(sizeof(SpriteVertex), SpriteCount * 4, true);
-		m_indexBuffer = m_graphics->CreateIndexBuffer_Imp(SpriteCount * 6, false,true);
-
+		for (int32_t i = 0; i < SpriteCount; i++)
 		{
-			m_indexBuffer->Lock();
-			auto ib = m_indexBuffer->GetBuffer<uint32_t>(SpriteCount * 6);
+			ib[i * 6 + 0] = 0 + i * 4;
+			ib[i * 6 + 1] = 1 + i * 4;
+			ib[i * 6 + 2] = 2 + i * 4;
+			ib[i * 6 + 3] = 0 + i * 4;
+			ib[i * 6 + 4] = 2 + i * 4;
+			ib[i * 6 + 5] = 3 + i * 4;
+		}
 
-			for (int32_t i = 0; i < SpriteCount; i++)
+		m_indexBuffer->Unlock();
+	}
+
+	std::vector<asd::VertexLayout> vl;
+	vl.push_back(asd::VertexLayout("Pos", asd::VertexLayoutFormat::R32G32B32_FLOAT));
+	vl.push_back(asd::VertexLayout("UV", asd::VertexLayoutFormat::R32G32_FLOAT));
+	vl.push_back(asd::VertexLayout("UVSubA", asd::VertexLayoutFormat::R32G32_FLOAT));
+	vl.push_back(asd::VertexLayout("Color", asd::VertexLayoutFormat::R8G8B8A8_UNORM));
+
+	std::vector<asd::Macro> macro_tex;
+	macro_tex.push_back(Macro("HAS_TEXTURE", "1"));
+
+	std::vector<asd::Macro> macro;
+
+	if (m_graphics->GetGraphicsDeviceType() == GraphicsDeviceType::OpenGL)
+	{
+		m_shader = m_graphics->GetShaderCache()->CreateFromCode(
+			ToAString(L"Internal.2D.Renderer2D.Texture").c_str(), renderer2d_vs_gl, renderer2d_ps_gl, vl, macro_tex);
+	}
+	else
+	{
+		m_shader = m_graphics->GetShaderCache()->CreateFromCode(
+			ToAString(L"Internal.2D.Renderer2D.Texture").c_str(), renderer2d_vs_dx, renderer2d_ps_dx, vl, macro_tex);
+	}
+
+	if (m_graphics->GetGraphicsDeviceType() == GraphicsDeviceType::OpenGL)
+	{
+		m_shader_nt = m_graphics->GetShaderCache()->CreateFromCode(
+			ToAString(L"Internal.2D.Renderer2D").c_str(), renderer2d_vs_gl, renderer2d_ps_gl, vl, macro);
+	}
+	else
+	{
+		m_shader_nt = m_graphics->GetShaderCache()->CreateFromCode(
+			ToAString(L"Internal.2D.Renderer2D").c_str(), renderer2d_vs_dx, renderer2d_ps_dx, vl, macro);
+	}
+
+	// エフェクト
+	{
+		m_effectManager = ::Effekseer::Manager::Create(6000, false);
+		m_effectRenderer = EffekseerHelper::CreateRenderer(m_graphics, 6000);
+
+		m_effectManager->SetSpriteRenderer(m_effectRenderer->CreateSpriteRenderer());
+		m_effectManager->SetRibbonRenderer(m_effectRenderer->CreateRibbonRenderer());
+		m_effectManager->SetRingRenderer(m_effectRenderer->CreateRingRenderer());
+		m_effectManager->SetModelRenderer(m_effectRenderer->CreateModelRenderer());
+		m_effectManager->SetTrackRenderer(m_effectRenderer->CreateTrackRenderer());
+
+		m_effectManager->SetSetting(m_graphics->GetEffectSetting());
+	}
+
+	// Create Linear, Gamma lookup table
+	for (int32_t i = 0; i < 256; i++)
+	{
+		linearColorLookUpTable[i] = (std::pow(i / 255.0f, 2.2f) * 255.0f);
+		gammaColorLookUpTable[i] = (std::pow(i / 255.0f, 1.0f / 2.2f) * 255.0f);
+	}
+}
+
+//----------------------------------------------------------------------------------
+//
+//----------------------------------------------------------------------------------
+Renderer2D_Imp::~Renderer2D_Imp()
+{
+	ClearCache();
+
+	m_vertexBuffer.reset();
+	m_indexBuffer.reset();
+	m_shader_nt.reset();
+	m_shader.reset();
+
+	m_effectRenderer->Destroy();
+	m_effectManager->Destroy();
+	m_effectRenderer = nullptr;
+	m_effectManager = nullptr;
+
+	SafeRelease(m_graphics);
+}
+
+void Renderer2D_Imp::SetArea(const RectF& area, float angle)
+{
+	this->area = area;
+	this->angle = angle;
+}
+
+//----------------------------------------------------------------------------------
+//
+//----------------------------------------------------------------------------------
+void Renderer2D_Imp::DrawCache()
+{
+	auto distortion = (EffectDistortingCallback*)this->m_effectRenderer->GetDistortingCallback();
+	distortion->IsEnabled = IsDistortionEnabled;
+
+	auto ang = angle;
+
+	// エフェクト設定
+	{
+		Matrix44 effectProjMat;
+		Matrix44 effectCameraMat;
+		effectProjMat.SetOrthographicRH(area.Width, area.Height, 0.1, 800.0);
+
+		auto px = area.X + area.Width / 2;
+		auto py = -(area.Y + area.Height / 2);
+
+		Vector3DF up = Vector3DF(sin(ang), cos(ang), 0);
+
+		effectCameraMat.SetLookAtRH(Vector3DF(px, py, 400), Vector3DF(px, py, 0), up);
+
+		// 行列を転置して設定
+
+		Effekseer::Matrix44 cameraMat, projMat;
+		for (auto c_ = 0; c_ < 4; c_++)
+		{
+			for (auto r = 0; r < 4; r++)
 			{
-				ib[i * 6 + 0] = 0 + i * 4;
-				ib[i * 6 + 1] = 1 + i * 4;
-				ib[i * 6 + 2] = 2 + i * 4;
-				ib[i * 6 + 3] = 0 + i * 4;
-				ib[i * 6 + 4] = 2 + i * 4;
-				ib[i * 6 + 5] = 3 + i * 4;
+				cameraMat.Values[c_][r] = effectCameraMat.Values[r][c_];
+				projMat.Values[c_][r] = effectProjMat.Values[r][c_];
 			}
-
-			m_indexBuffer->Unlock();
 		}
+		m_effectRenderer->SetCameraMatrix(cameraMat);
+		m_effectRenderer->SetProjectionMatrix(projMat);
+	}
 
-		std::vector<asd::VertexLayout> vl;
-		vl.push_back(asd::VertexLayout("Pos", asd::VertexLayoutFormat::R32G32B32_FLOAT));
-		vl.push_back(asd::VertexLayout("UV", asd::VertexLayoutFormat::R32G32_FLOAT));
-		vl.push_back(asd::VertexLayout("UVSubA", asd::VertexLayoutFormat::R32G32_FLOAT));
-		vl.push_back(asd::VertexLayout("Color", asd::VertexLayoutFormat::R8G8B8A8_UNORM));
+	StartDrawing();
 
-		std::vector<asd::Macro> macro_tex;
-		macro_tex.push_back(Macro("HAS_TEXTURE", "1"));
-
-		std::vector<asd::Macro> macro;
-
-		if (m_graphics->GetGraphicsDeviceType() == GraphicsDeviceType::OpenGL)
+	for (auto& c : m_events)
+	{
+		for (auto& e : c.second)
 		{
-			m_shader = m_graphics->GetShaderCache()->CreateFromCode(
-				ToAString(L"Internal.2D.Renderer2D.Texture").c_str(),
-				renderer2d_vs_gl,
-				renderer2d_ps_gl,
-				vl,
-				macro_tex);
-		}
-		else
-		{
-			m_shader = m_graphics->GetShaderCache()->CreateFromCode(
-				ToAString(L"Internal.2D.Renderer2D.Texture").c_str(),
-				renderer2d_vs_dx,
-				renderer2d_ps_dx,
-				vl,
-				macro_tex);
-		}
-
-		if (m_graphics->GetGraphicsDeviceType() == GraphicsDeviceType::OpenGL)
-		{
-			m_shader_nt = m_graphics->GetShaderCache()->CreateFromCode(
-				ToAString(L"Internal.2D.Renderer2D").c_str(),
-				renderer2d_vs_gl,
-				renderer2d_ps_gl,
-				vl,
-				macro);
-		}
-		else
-		{
-			m_shader_nt = m_graphics->GetShaderCache()->CreateFromCode(
-				ToAString(L"Internal.2D.Renderer2D").c_str(),
-				renderer2d_vs_dx,
-				renderer2d_ps_dx,
-				vl,
-				macro);
-		}
-
-		// エフェクト
-		{
-			m_effectManager = ::Effekseer::Manager::Create(6000, false);
-			m_effectRenderer = EffekseerHelper::CreateRenderer(m_graphics, 6000);
-
-			m_effectManager->SetSpriteRenderer(m_effectRenderer->CreateSpriteRenderer());
-			m_effectManager->SetRibbonRenderer(m_effectRenderer->CreateRibbonRenderer());
-			m_effectManager->SetRingRenderer(m_effectRenderer->CreateRingRenderer());
-			m_effectManager->SetModelRenderer(m_effectRenderer->CreateModelRenderer());
-			m_effectManager->SetTrackRenderer(m_effectRenderer->CreateTrackRenderer());
-
-			m_effectManager->SetSetting(m_graphics->GetEffectSetting());
-		}
-
-		// Create Linear, Gamma lookup table
-		for (int32_t i = 0; i < 256; i++)
-		{
-			linearColorLookUpTable[i] = (std::pow(i / 255.0f, 2.2f) * 255.0f);
-			gammaColorLookUpTable[i] = (std::pow(i / 255.0f, 1.0f / 2.2f) * 255.0f);
+			Draw(e);
 		}
 	}
 
-	//----------------------------------------------------------------------------------
-	//
-	//----------------------------------------------------------------------------------
-	Renderer2D_Imp::~Renderer2D_Imp()
+	EndDrawing();
+}
+
+//----------------------------------------------------------------------------------
+//
+//----------------------------------------------------------------------------------
+void Renderer2D_Imp::ClearCache()
+{
+	for (auto& c : m_events)
 	{
-		ClearCache();
-
-		m_vertexBuffer.reset();
-		m_indexBuffer.reset();
-		m_shader_nt.reset();
-		m_shader.reset();
-
-		m_effectRenderer->Destroy();
-		m_effectManager->Destroy();
-		m_effectRenderer = nullptr;
-		m_effectManager = nullptr;
-
-		SafeRelease(m_graphics);
-	}
-
-	void Renderer2D_Imp::SetArea(const RectF& area, float angle)
-	{
-		this->area = area;
-		this->angle = angle;
-	}
-
-	//----------------------------------------------------------------------------------
-	//
-	//----------------------------------------------------------------------------------
-	void Renderer2D_Imp::DrawCache()
-	{
-		auto distortion = (EffectDistortingCallback*)this->m_effectRenderer->GetDistortingCallback();
-		distortion->IsEnabled = IsDistortionEnabled;
-
-		auto ang = angle;
-
-		// エフェクト設定
+		for (auto& e : c.second)
 		{
-			Matrix44 effectProjMat;
-			Matrix44 effectCameraMat;
-			effectProjMat.SetOrthographicRH(area.Width, area.Height, 0.1, 800.0);
-
-			auto px = area.X + area.Width / 2;
-			auto py = -(area.Y + area.Height / 2);
-
-			Vector3DF up = Vector3DF(sin(ang), cos(ang), 0);
-
-			effectCameraMat.SetLookAtRH(Vector3DF(px, py, 400), Vector3DF(px, py, 0), up);
-
-			// 行列を転置して設定
-
-			Effekseer::Matrix44 cameraMat, projMat;
-			for (auto c_ = 0; c_ < 4; c_++)
+			if (e.Type == Event::EventType::Sprite)
 			{
-				for (auto r = 0; r < 4; r++)
+				SafeRelease(e.Data.Sprite.TexturePtr);
+				SafeRelease(e.Data.Sprite.Material2DPtr);
+			}
+			else if (e.Type == Event::EventType::Effect)
+			{
+			}
+		}
+
+		c.second.clear();
+	}
+}
+
+void Renderer2D_Imp::AddSprite(Vector2DF positions[4],
+							   Color colors[4],
+							   Vector2DF uv[4],
+							   Texture2D* texture,
+							   AlphaBlendMode alphaBlend,
+							   int32_t priority,
+							   TextureFilterType filter,
+							   TextureWrapType wrap)
+{
+	Event e;
+	e.Type = Event::EventType::Sprite;
+
+	e.Data.Sprite.IsLinearColor = false;
+	memcpy(e.Data.Sprite.Positions, positions, sizeof(asd::Vector2DF) * 4);
+	memcpy(e.Data.Sprite.Colors, colors, sizeof(asd::Color) * 4);
+	memcpy(e.Data.Sprite.UV, uv, sizeof(asd::Vector2DF) * 4);
+	e.Data.Sprite.AlphaBlendState = alphaBlend;
+	e.Data.Sprite.TexturePtr = texture;
+	e.Data.Sprite.Material2DPtr = nullptr;
+	e.Data.Sprite.Filter = filter;
+	e.Data.Sprite.Wrap = wrap;
+
+	SafeAddRef(e.Data.Sprite.TexturePtr);
+	SafeAddRef(e.Data.Sprite.Material2DPtr);
+
+	AddEvent(priority, e);
+}
+
+void Renderer2D_Imp::AddSpriteWithMaterial(Vector2DF positions[4],
+										   Color colors[4],
+										   Vector2DF uv[4],
+										   Vector2DF uvSub1[4],
+										   Texture2D* texture,
+										   Material2D* material,
+										   AlphaBlendMode alphaBlend,
+										   int32_t priority,
+										   TextureFilterType filter,
+										   TextureWrapType wrap)
+{
+	Event e;
+	e.Type = Event::EventType::Sprite;
+
+	e.Data.Sprite.IsLinearColor = false;
+	memcpy(e.Data.Sprite.Positions, positions, sizeof(asd::Vector2DF) * 4);
+	memcpy(e.Data.Sprite.Colors, colors, sizeof(asd::Color) * 4);
+	memcpy(e.Data.Sprite.UV, uv, sizeof(asd::Vector2DF) * 4);
+	memcpy(e.Data.Sprite.UVSub1, uvSub1, sizeof(asd::Vector2DF) * 4);
+	e.Data.Sprite.AlphaBlendState = alphaBlend;
+	e.Data.Sprite.TexturePtr = texture;
+	e.Data.Sprite.Material2DPtr = material;
+	e.Data.Sprite.Filter = filter;
+	e.Data.Sprite.Wrap = wrap;
+
+	SafeAddRef(e.Data.Sprite.TexturePtr);
+	SafeAddRef(e.Data.Sprite.Material2DPtr);
+
+	AddEvent(priority, e);
+}
+
+void Renderer2D_Imp::AddText(Matrix33& parentMatrix,
+							 Matrix33& matrix,
+							 Vector2DF centerPosition,
+							 bool turnLR,
+							 bool turnUL,
+							 Color color,
+							 Font* font,
+							 const achar* text,
+							 WritingDirection writingDirection,
+							 AlphaBlendMode alphaBlend,
+							 int32_t priority,
+							 float lineSpacing,
+							 float letterSpacing,
+							 bool isRichTextMode,
+							 TextureFilterType filter,
+							 TextureWrapType wrap)
+{
+	AddTextWithMaterial(parentMatrix,
+						matrix,
+						centerPosition,
+						turnLR,
+						turnUL,
+						color,
+						font,
+						text,
+						nullptr,
+						writingDirection,
+						alphaBlend,
+						priority,
+						lineSpacing,
+						letterSpacing,
+						isRichTextMode,
+						filter,
+						wrap);
+}
+
+void Renderer2D_Imp::AddTextWithMaterial(Matrix33& parentMatrix,
+										 Matrix33& matrix,
+										 Vector2DF centerPosition,
+										 bool turnLR,
+										 bool turnUL,
+										 Color color,
+										 Font* font,
+										 const achar* text,
+										 Material2D* material,
+										 WritingDirection writingDirection,
+										 AlphaBlendMode alphaBlend,
+										 int32_t priority,
+										 float lineSpacing,
+										 float letterSpacing,
+										 bool isRichTextMode,
+										 TextureFilterType filter,
+										 TextureWrapType wrap)
+{
+	Vector2DF drawPosition = Vector2DF(0, 0);
+
+	std::array<Color, 4> colors;
+	colors.at(0) = color;
+	colors.at(1) = color;
+	colors.at(2) = color;
+	colors.at(3) = color;
+
+	float offset = 0;
+	Font_Imp* font_Imp = (Font_Imp*)font;
+
+	font_Imp->AddCharactorsDynamically(text);
+	font_Imp->UpdateTextureDynamically();
+
+	auto textSize = font_Imp->CalcTextureSize(text, writingDirection);
+
+	for (int textIndex = 0;; ++textIndex)
+	{
+		if (text[textIndex] == 0)
+			break;
+
+		if (isRichTextMode)
+		{
+			if (text[textIndex] == u'\\')
+			{
+				auto currentText = std::u16string(text + textIndex);
+
+				if (text[textIndex + 1] == u'\\')
 				{
-					cameraMat.Values[c_][r] = effectCameraMat.Values[r][c_];
-					projMat.Values[c_][r] = effectProjMat.Values[r][c_];
+					// backslash x 2
+					textIndex++;
 				}
-			}
-			m_effectRenderer->SetCameraMatrix(cameraMat);
-			m_effectRenderer->SetProjectionMatrix(projMat);
-		}
-
-		StartDrawing();
-
-		for (auto& c : m_events)
-		{
-			for (auto& e : c.second)
-			{
-				Draw(e);
-			}
-		}
-
-
-		EndDrawing();
-	}
-
-	//----------------------------------------------------------------------------------
-	//
-	//----------------------------------------------------------------------------------
-	void Renderer2D_Imp::ClearCache()
-	{
-		for (auto& c : m_events)
-		{
-			for (auto& e : c.second)
-			{
-				if (e.Type == Event::EventType::Sprite)
+				else if (currentText[1] == u'c' && currentText.size() > 10)
 				{
-					SafeRelease(e.Data.Sprite.TexturePtr);
-					SafeRelease(e.Data.Sprite.Material2DPtr);
-				}
-				else if (e.Type == Event::EventType::Effect)
-				{
-				}
-			}
+					// backslash + c
+					textIndex += 2;
 
-			c.second.clear();
-		}
-	}
+					// load color
+					auto r = to_number(currentText[2]) * 16 + to_number(currentText[3]);
+					auto g = to_number(currentText[4]) * 16 + to_number(currentText[5]);
+					auto b = to_number(currentText[6]) * 16 + to_number(currentText[7]);
+					auto a = to_number(currentText[8]) * 16 + to_number(currentText[9]);
 
-	void Renderer2D_Imp::AddSprite(Vector2DF positions[4], Color colors[4], Vector2DF uv[4], Texture2D* texture, AlphaBlendMode alphaBlend, int32_t priority, TextureFilterType filter, TextureWrapType wrap)
-	{
-		Event e;
-		e.Type = Event::EventType::Sprite;
-
-		e.Data.Sprite.IsLinearColor = false;
-		memcpy(e.Data.Sprite.Positions, positions, sizeof(asd::Vector2DF) * 4);
-		memcpy(e.Data.Sprite.Colors, colors, sizeof(asd::Color) * 4);
-		memcpy(e.Data.Sprite.UV, uv, sizeof(asd::Vector2DF) * 4);
-		e.Data.Sprite.AlphaBlendState = alphaBlend;
-		e.Data.Sprite.TexturePtr = texture;
-		e.Data.Sprite.Material2DPtr = nullptr;
-		e.Data.Sprite.Filter = filter;
-		e.Data.Sprite.Wrap = wrap;
-
-		SafeAddRef(e.Data.Sprite.TexturePtr);
-		SafeAddRef(e.Data.Sprite.Material2DPtr);
-
-		AddEvent(priority, e);
-	}
-
-	void Renderer2D_Imp::AddSpriteWithMaterial(Vector2DF positions[4], Color colors[4], Vector2DF uv[4], Vector2DF uvSub1[4], Texture2D* texture, Material2D* material, AlphaBlendMode alphaBlend, int32_t priority, TextureFilterType filter, TextureWrapType wrap)
-	{
-		Event e;
-		e.Type = Event::EventType::Sprite;
-
-		e.Data.Sprite.IsLinearColor = false;
-		memcpy(e.Data.Sprite.Positions, positions, sizeof(asd::Vector2DF) * 4);
-		memcpy(e.Data.Sprite.Colors, colors, sizeof(asd::Color) * 4);
-		memcpy(e.Data.Sprite.UV, uv, sizeof(asd::Vector2DF) * 4);
-		memcpy(e.Data.Sprite.UVSub1, uvSub1, sizeof(asd::Vector2DF) * 4);
-		e.Data.Sprite.AlphaBlendState = alphaBlend;
-		e.Data.Sprite.TexturePtr = texture;
-		e.Data.Sprite.Material2DPtr = material;
-		e.Data.Sprite.Filter = filter;
-		e.Data.Sprite.Wrap = wrap;
-
-		SafeAddRef(e.Data.Sprite.TexturePtr);
-		SafeAddRef(e.Data.Sprite.Material2DPtr);
-
-		AddEvent(priority, e);
-	}
-
-	void Renderer2D_Imp::AddText(Matrix33& parentMatrix, Matrix33& matrix, Vector2DF centerPosition, bool turnLR, bool turnUL, Color color, Font* font, const achar* text, WritingDirection writingDirection, AlphaBlendMode alphaBlend, int32_t priority, float lineSpacing, float letterSpacing, bool isRichTextMode, TextureFilterType filter, TextureWrapType wrap)
-	{
-		AddTextWithMaterial(parentMatrix, matrix, centerPosition, turnLR, turnUL, color, font, text, nullptr, writingDirection, alphaBlend, priority, lineSpacing, letterSpacing, isRichTextMode, filter, wrap);
-	}
-
-	void Renderer2D_Imp::AddTextWithMaterial(Matrix33& parentMatrix, Matrix33& matrix, Vector2DF centerPosition, bool turnLR, bool turnUL, Color color, Font* font, const achar* text, Material2D* material, WritingDirection writingDirection, AlphaBlendMode alphaBlend, int32_t priority, float lineSpacing, float letterSpacing, bool isRichTextMode, TextureFilterType filter, TextureWrapType wrap)
-	{
-		Vector2DF drawPosition = Vector2DF(0, 0);
-
-		std::array<Color, 4> colors;
-		colors.at(0) = color;
-		colors.at(1) = color;
-		colors.at(2) = color;
-		colors.at(3) = color;
-
-		float offset = 0;
-		Font_Imp* font_Imp = (Font_Imp*)font;
-
-		font_Imp->AddCharactorsDynamically(text);
-		font_Imp->UpdateTextureDynamically();
-
-		auto textSize = font_Imp->CalcTextureSize(text, writingDirection);
-
-		for (int textIndex = 0;; ++textIndex)
-		{
-			if (text[textIndex] == 0) break;
-
-			if (isRichTextMode)
-			{
-				if (text[textIndex] == u'\\')
-				{
-					auto currentText = std::u16string(text + textIndex);
-
-					if (text[textIndex + 1] == u'\\')
+					for (auto& c : colors)
 					{
-						// backslash x 2
-						textIndex++;
+						c = Color(r, g, b, a);
 					}
-					else if (currentText[1] == u'c' && currentText.size() > 10)
-					{
-						// backslash + c
-						textIndex += 2;
 
-						// load color
-						auto r = to_number(currentText[2]) * 16 + to_number(currentText[3]);
-						auto g = to_number(currentText[4]) * 16 + to_number(currentText[5]);
-						auto b = to_number(currentText[6]) * 16 + to_number(currentText[7]);
-						auto a = to_number(currentText[8]) * 16 + to_number(currentText[9]);
-
-						for (auto& c : colors)
-						{
-							c = Color(r, g, b, a);
-						}
-
-						textIndex += 8;
-					}
+					textIndex += 8;
 				}
 			}
+		}
 
-			RectI glyphSrc;
-			Texture2D* texture = nullptr;
+		RectI glyphSrc;
+		Texture2D* texture = nullptr;
 
-			if (text[textIndex] == '\n')
-			{
-				if (writingDirection == WritingDirection::Horizontal)
-				{
-					drawPosition.X = 0;
-					drawPosition.Y += (offset + lineSpacing);
-				}
-				else
-				{
-					drawPosition.X += (offset + lineSpacing);
-					drawPosition.Y = 0;
-				}
-				offset = 0;
-
-				continue;
-			}
-			else if (font_Imp->GetImageGlyph(text[textIndex]) != nullptr)
-			{
-				texture = font_Imp->GetImageGlyph(text[textIndex]);
-				glyphSrc = RectI(0, 0, texture->GetSize().X, texture->GetSize().Y);
-			}
-			else if (font_Imp->HasGlyphData(text[textIndex]))
-			{
-				auto glyphData = font_Imp->GetGlyphData(text[textIndex]);
-				glyphSrc = glyphData.GetSrc();
-				texture = font_Imp->GetTexture(glyphData.GetSheetNum()).get();
-			}
-
-			
-			if (texture == nullptr)
-			{
-				continue;
-			}
-
-			std::array<Vector2DF, 4> position;
-
-			{
-				position.at(0) = Vector2DF(0, 0);
-				position.at(1) = Vector2DF(glyphSrc.Width, 0);
-				position.at(2) = Vector2DF(glyphSrc.Width, glyphSrc.Height);
-				position.at(3) = Vector2DF(0, glyphSrc.Height);
-
-				for (auto& pos : position)
-				{
-					pos += drawPosition;
-					pos -= centerPosition;
-					auto v3 = Vector3DF(pos.X, pos.Y, 1);
-					auto result = parentMatrix * matrix * v3;
-					pos = Vector2DF(result.X, result.Y);
-				}
-
-			}
-
-			std::array<Vector2DF, 4> uvs;
-			{
-				const auto textureSize = Vector2DF(texture->GetSize().X, texture->GetSize().Y);
-
-				uvs.at(0) = Vector2DF(glyphSrc.X, glyphSrc.Y);
-				uvs.at(1) = Vector2DF(glyphSrc.X + glyphSrc.Width, glyphSrc.Y);
-				uvs.at(2) = Vector2DF(glyphSrc.X + glyphSrc.Width, glyphSrc.Y + glyphSrc.Height);
-				uvs.at(3) = Vector2DF(glyphSrc.X, glyphSrc.Y + glyphSrc.Height);
-
-				for (auto& uv : uvs)
-				{
-					uv /= textureSize;
-				}
-
-				if (turnLR)
-				{
-					std::swap(uvs.at(0), uvs.at(1));
-					std::swap(uvs.at(2), uvs.at(3));
-				}
-
-				if (turnUL)
-				{
-					std::swap(uvs.at(0), uvs.at(3));
-					std::swap(uvs.at(1), uvs.at(2));
-				}
-			}
-			
-			std::array<Vector2DF, 4> uv_sub1s;
-			{
-				uv_sub1s.at(0) = Vector2DF(drawPosition.X, drawPosition.Y);
-				uv_sub1s.at(1) = Vector2DF(drawPosition.X + glyphSrc.Width, drawPosition.Y);
-				uv_sub1s.at(2) = Vector2DF(drawPosition.X + glyphSrc.Width, drawPosition.Y + glyphSrc.Height);
-				uv_sub1s.at(3) = Vector2DF(drawPosition.X, drawPosition.Y + glyphSrc.Height);
-
-				for (auto& uv : uv_sub1s)
-				{
-					uv /= textSize.To2DF();
-				}
-			}
-
-			AddSpriteWithMaterial(position.data(), &colors[0], uvs.data(), uv_sub1s.data(), texture, material, alphaBlend, priority, filter, wrap);
-
+		if (text[textIndex] == '\n')
+		{
 			if (writingDirection == WritingDirection::Horizontal)
 			{
-				drawPosition += asd::Vector2DF(glyphSrc.Width + letterSpacing, 0);
-				offset = std::max((float)glyphSrc.Height, offset);
+				drawPosition.X = 0;
+				drawPosition.Y += (offset + lineSpacing);
 			}
 			else
 			{
-				drawPosition += asd::Vector2DF(0, glyphSrc.Height + letterSpacing);
-				offset = std::max((float)glyphSrc.Height, offset);
+				drawPosition.X += (offset + lineSpacing);
+				drawPosition.Y = 0;
+			}
+			offset = 0;
+
+			continue;
+		}
+		else if (font_Imp->GetImageGlyph(text[textIndex]) != nullptr)
+		{
+			texture = font_Imp->GetImageGlyph(text[textIndex]);
+			glyphSrc = RectI(0, 0, texture->GetSize().X, texture->GetSize().Y);
+		}
+		else if (font_Imp->HasGlyphData(text[textIndex]))
+		{
+			auto glyphData = font_Imp->GetGlyphData(text[textIndex]);
+			glyphSrc = glyphData.GetSrc();
+			texture = font_Imp->GetTexture(glyphData.GetSheetNum()).get();
+		}
+
+		if (texture == nullptr)
+		{
+			continue;
+		}
+
+		std::array<Vector2DF, 4> position;
+
+		{
+			position.at(0) = Vector2DF(0, 0);
+			position.at(1) = Vector2DF(glyphSrc.Width, 0);
+			position.at(2) = Vector2DF(glyphSrc.Width, glyphSrc.Height);
+			position.at(3) = Vector2DF(0, glyphSrc.Height);
+
+			for (auto& pos : position)
+			{
+				pos += drawPosition;
+				pos -= centerPosition;
+				auto v3 = Vector3DF(pos.X, pos.Y, 1);
+				auto result = parentMatrix * matrix * v3;
+				pos = Vector2DF(result.X, result.Y);
 			}
 		}
-	}
 
-	void Renderer2D_Imp::AddEffect(::Effekseer::Handle handle, int32_t priority)
-	{
-		Event e;
-		e.Type = Event::EventType::Effect;
-		e.Data.Effect.EffectHandle = handle;
-
-		AddEvent(priority, e);
-	}
-
-	//----------------------------------------------------------------------------------
-	//
-	//----------------------------------------------------------------------------------
-	void Renderer2D_Imp::AddEvent(int32_t priority, Event& e)
-	{
-		auto ev = m_events.find(priority);
-		if (ev == m_events.end())
+		std::array<Vector2DF, 4> uvs;
 		{
-			m_events[priority] = std::vector<Event>({e});
+			const auto textureSize = Vector2DF(texture->GetSize().X, texture->GetSize().Y);
+
+			uvs.at(0) = Vector2DF(glyphSrc.X, glyphSrc.Y);
+			uvs.at(1) = Vector2DF(glyphSrc.X + glyphSrc.Width, glyphSrc.Y);
+			uvs.at(2) = Vector2DF(glyphSrc.X + glyphSrc.Width, glyphSrc.Y + glyphSrc.Height);
+			uvs.at(3) = Vector2DF(glyphSrc.X, glyphSrc.Y + glyphSrc.Height);
+
+			for (auto& uv : uvs)
+			{
+				uv /= textureSize;
+			}
+
+			if (turnLR)
+			{
+				std::swap(uvs.at(0), uvs.at(1));
+				std::swap(uvs.at(2), uvs.at(3));
+			}
+
+			if (turnUL)
+			{
+				std::swap(uvs.at(0), uvs.at(3));
+				std::swap(uvs.at(1), uvs.at(2));
+			}
+		}
+
+		std::array<Vector2DF, 4> uv_sub1s;
+		{
+			uv_sub1s.at(0) = Vector2DF(drawPosition.X, drawPosition.Y);
+			uv_sub1s.at(1) = Vector2DF(drawPosition.X + glyphSrc.Width, drawPosition.Y);
+			uv_sub1s.at(2) = Vector2DF(drawPosition.X + glyphSrc.Width, drawPosition.Y + glyphSrc.Height);
+			uv_sub1s.at(3) = Vector2DF(drawPosition.X, drawPosition.Y + glyphSrc.Height);
+
+			for (auto& uv : uv_sub1s)
+			{
+				uv /= textSize.To2DF();
+			}
+		}
+
+		AddSpriteWithMaterial(
+			position.data(), &colors[0], uvs.data(), uv_sub1s.data(), texture, material, alphaBlend, priority, filter, wrap);
+
+		if (writingDirection == WritingDirection::Horizontal)
+		{
+			drawPosition += asd::Vector2DF(glyphSrc.Width + letterSpacing, 0);
+			offset = std::max((float)glyphSrc.Height, offset);
 		}
 		else
 		{
-			(*ev).second.push_back(e);
+			drawPosition += asd::Vector2DF(0, glyphSrc.Height + letterSpacing);
+			offset = std::max((float)glyphSrc.Height, offset);
 		}
 	}
+}
 
-	//----------------------------------------------------------------------------------
-	//
-	//----------------------------------------------------------------------------------
-	void Renderer2D_Imp::StartDrawing()
+void Renderer2D_Imp::AddEffect(::Effekseer::Handle handle, int32_t priority)
+{
+	Event e;
+	e.Type = Event::EventType::Effect;
+	e.Data.Effect.EffectHandle = handle;
+
+	AddEvent(priority, e);
+}
+
+//----------------------------------------------------------------------------------
+//
+//----------------------------------------------------------------------------------
+void Renderer2D_Imp::AddEvent(int32_t priority, Event& e)
+{
+	auto ev = m_events.find(priority);
+	if (ev == m_events.end())
 	{
-		
+		m_events[priority] = std::vector<Event>({e});
 	}
-
-	//----------------------------------------------------------------------------------
-	//
-	//----------------------------------------------------------------------------------
-	void Renderer2D_Imp::Draw(Event& e)
+	else
 	{
-		auto resetState = [this,e]() -> void
-		{
-			m_state.TexturePtr = e.Data.Sprite.TexturePtr;
-			m_state.Material2DPtr = e.Data.Sprite.Material2DPtr;
-			m_state.AlphaBlendState = e.Data.Sprite.AlphaBlendState;
-			m_state.Filter = e.Data.Sprite.Filter;
-			m_state.Wrap = e.Data.Sprite.Wrap;
-		};
+		(*ev).second.push_back(e);
+	}
+}
 
-		if (e.Type == Event::EventType::Sprite)
-		{
-			DrawEffect();
+//----------------------------------------------------------------------------------
+//
+//----------------------------------------------------------------------------------
+void Renderer2D_Imp::StartDrawing() {}
 
-			if (m_drawingSprites.size() == 0)
+//----------------------------------------------------------------------------------
+//
+//----------------------------------------------------------------------------------
+void Renderer2D_Imp::Draw(Event& e)
+{
+	auto resetState = [this, e]() -> void {
+		m_state.TexturePtr = e.Data.Sprite.TexturePtr;
+		m_state.Material2DPtr = e.Data.Sprite.Material2DPtr;
+		m_state.AlphaBlendState = e.Data.Sprite.AlphaBlendState;
+		m_state.Filter = e.Data.Sprite.Filter;
+		m_state.Wrap = e.Data.Sprite.Wrap;
+	};
+
+	if (e.Type == Event::EventType::Sprite)
+	{
+		DrawEffect();
+
+		if (m_drawingSprites.size() == 0)
+		{
+			// 初期値設定
+			resetState();
+		}
+		else
+		{
+			// 同時描画不可のケースかどうか?
+			// もしくはバッファが溢れないかどうか?
+			if (m_state.TexturePtr != e.Data.Sprite.TexturePtr || m_state.Material2DPtr != e.Data.Sprite.Material2DPtr ||
+				m_state.AlphaBlendState != e.Data.Sprite.AlphaBlendState || m_state.Filter != e.Data.Sprite.Filter ||
+				m_state.Wrap != e.Data.Sprite.Wrap ||
+
+				m_drawingSprites.size() >= SpriteCount)
 			{
-				// 初期値設定
+				DrawSprite();
 				resetState();
 			}
-			else
-			{
-				// 同時描画不可のケースかどうか?
-				// もしくはバッファが溢れないかどうか?
-				if (m_state.TexturePtr != e.Data.Sprite.TexturePtr ||
-					m_state.Material2DPtr != e.Data.Sprite.Material2DPtr ||
-					m_state.AlphaBlendState != e.Data.Sprite.AlphaBlendState ||
-					m_state.Filter != e.Data.Sprite.Filter ||
-					m_state.Wrap != e.Data.Sprite.Wrap ||
-
-					m_drawingSprites.size() >= SpriteCount)
-				{
-					DrawSprite();
-					resetState();
-				}
-			}
-
-			// 書き込み
-			m_drawingSprites.push_back(&e);
-		}
-		else if (e.Type == Event::EventType::Effect)
-		{
-			DrawSprite();
-
-			// 書き込み
-			drawingEffects.push_back(&e);
-		}
-		else
-		{
-			DrawSprite();
-			DrawEffect();
 		}
 
+		// 書き込み
+		m_drawingSprites.push_back(&e);
 	}
+	else if (e.Type == Event::EventType::Effect)
+	{
+		DrawSprite();
 
-	//----------------------------------------------------------------------------------
-	//
-	//----------------------------------------------------------------------------------
-	void Renderer2D_Imp::EndDrawing()
+		// 書き込み
+		drawingEffects.push_back(&e);
+	}
+	else
 	{
 		DrawSprite();
 		DrawEffect();
 	}
+}
 
-	//----------------------------------------------------------------------------------
-	//
-	//----------------------------------------------------------------------------------
-	void Renderer2D_Imp::DrawSprite()
+//----------------------------------------------------------------------------------
+//
+//----------------------------------------------------------------------------------
+void Renderer2D_Imp::EndDrawing()
+{
+	DrawSprite();
+	DrawEffect();
+}
+
+//----------------------------------------------------------------------------------
+//
+//----------------------------------------------------------------------------------
+void Renderer2D_Imp::DrawSprite()
+{
+	if (m_drawingSprites.size() == 0)
+		return;
+
+	auto isMaterialMode = m_state.Material2DPtr != nullptr;
+
+	// 行列を計算
+	Matrix44 mat, mat_t, mat_scale, mat_rot;
+
+	mat_t.SetTranslation(-(area.X + area.Width / 2.0f), -(area.Y + area.Height / 2.0f), 0);
+	mat_scale.SetScale(2.0f / area.Width, -2.0f / area.Height, 1.0f);
+	mat_rot.SetRotationZ(angle);
+
+	mat = mat_rot * mat_scale * mat_t;
+
+	// 頂点情報をビデオメモリに転送
+	if (!m_vertexBuffer->RingBufferLock(m_drawingSprites.size() * 4))
 	{
-		if (m_drawingSprites.size() == 0) return;
+		assert(0);
+	}
 
-		auto isMaterialMode = m_state.Material2DPtr != nullptr;
+	// m_vertexBuffer->Lock();
+	auto buf = m_vertexBuffer->GetBuffer<SpriteVertex>(m_drawingSprites.size() * 4);
 
-		// 行列を計算
-		Matrix44 mat, mat_t, mat_scale, mat_rot;
-
-		mat_t.SetTranslation(-(area.X + area.Width / 2.0f), -(area.Y + area.Height / 2.0f), 0);
-		mat_scale.SetScale(2.0f / area.Width, -2.0f / area.Height, 1.0f);
-		mat_rot.SetRotationZ(angle);
-
-		mat = mat_rot * mat_scale * mat_t;
-
-		// 頂点情報をビデオメモリに転送
-		if (!m_vertexBuffer->RingBufferLock(m_drawingSprites.size() * 4))
+	int32_t ind = 0;
+	for (auto& e : m_drawingSprites)
+	{
+		for (int32_t i = 0; i < 4; i++)
 		{
-			assert(0);
-		}
+			buf[ind + i].Position.X = e->Data.Sprite.Positions[i].X;
+			buf[ind + i].Position.Y = e->Data.Sprite.Positions[i].Y;
+			buf[ind + i].Position.Z = 0.5f;
+			buf[ind + i].UV.X = e->Data.Sprite.UV[i].X;
+			buf[ind + i].UV.Y = e->Data.Sprite.UV[i].Y;
+			buf[ind + i].UVSub1.X = e->Data.Sprite.UVSub1[i].X;
+			buf[ind + i].UVSub1.Y = e->Data.Sprite.UVSub1[i].Y;
 
-		//m_vertexBuffer->Lock();
-		auto buf = m_vertexBuffer->GetBuffer < SpriteVertex>(m_drawingSprites.size() * 4);
-
-		int32_t ind = 0;
-		for (auto& e : m_drawingSprites)
-		{
-			for (int32_t i = 0; i < 4; i++)
+			if (m_graphics->GetOption().ColorSpace == ColorSpaceType::GammaSpace)
 			{
-				buf[ind + i].Position.X = e->Data.Sprite.Positions[i].X;
-				buf[ind + i].Position.Y = e->Data.Sprite.Positions[i].Y;
-				buf[ind + i].Position.Z = 0.5f;
-				buf[ind + i].UV.X = e->Data.Sprite.UV[i].X;
-				buf[ind + i].UV.Y = e->Data.Sprite.UV[i].Y;
-				buf[ind + i].UVSub1.X = e->Data.Sprite.UVSub1[i].X;
-				buf[ind + i].UVSub1.Y = e->Data.Sprite.UVSub1[i].Y;
-
-				if (m_graphics->GetOption().ColorSpace == ColorSpaceType::GammaSpace)
+				if (e->Data.Sprite.IsLinearColor)
 				{
-					if (e->Data.Sprite.IsLinearColor)
-					{
-						buf[ind + i].Color_.R = gammaColorLookUpTable[e->Data.Sprite.Colors[i].R];
-						buf[ind + i].Color_.G = gammaColorLookUpTable[e->Data.Sprite.Colors[i].G];
-						buf[ind + i].Color_.B = gammaColorLookUpTable[e->Data.Sprite.Colors[i].B];
-						buf[ind + i].Color_.A = e->Data.Sprite.Colors[i].A;
-					}
-					else
-					{
-						buf[ind + i].Color_.R = e->Data.Sprite.Colors[i].R;
-						buf[ind + i].Color_.G = e->Data.Sprite.Colors[i].G;
-						buf[ind + i].Color_.B = e->Data.Sprite.Colors[i].B;
-						buf[ind + i].Color_.A = e->Data.Sprite.Colors[i].A;
-					}
+					buf[ind + i].Color_.R = gammaColorLookUpTable[e->Data.Sprite.Colors[i].R];
+					buf[ind + i].Color_.G = gammaColorLookUpTable[e->Data.Sprite.Colors[i].G];
+					buf[ind + i].Color_.B = gammaColorLookUpTable[e->Data.Sprite.Colors[i].B];
+					buf[ind + i].Color_.A = e->Data.Sprite.Colors[i].A;
 				}
 				else
 				{
-					if (e->Data.Sprite.IsLinearColor)
-					{
-						buf[ind + i].Color_.R = e->Data.Sprite.Colors[i].R;
-						buf[ind + i].Color_.G = e->Data.Sprite.Colors[i].G;
-						buf[ind + i].Color_.B = e->Data.Sprite.Colors[i].B;
-						buf[ind + i].Color_.A = e->Data.Sprite.Colors[i].A;
-					}
-					else
-					{
-						buf[ind + i].Color_.R = linearColorLookUpTable[e->Data.Sprite.Colors[i].R];
-						buf[ind + i].Color_.G = linearColorLookUpTable[e->Data.Sprite.Colors[i].G];
-						buf[ind + i].Color_.B = linearColorLookUpTable[e->Data.Sprite.Colors[i].B];
-						buf[ind + i].Color_.A = e->Data.Sprite.Colors[i].A;
-					}
+					buf[ind + i].Color_.R = e->Data.Sprite.Colors[i].R;
+					buf[ind + i].Color_.G = e->Data.Sprite.Colors[i].G;
+					buf[ind + i].Color_.B = e->Data.Sprite.Colors[i].B;
+					buf[ind + i].Color_.A = e->Data.Sprite.Colors[i].A;
 				}
-			}
-
-			// マテリアルモードではシェーダーで行列計算をしないため、CPUで計算
-			if (isMaterialMode)
-			{
-				for (int32_t i = 0; i < 4; i++)
-				{
-					buf[ind + i].Position = mat.Transform3D(buf[ind + i].Position);
-				}
-			}
-			ind += 4;
-		}
-
-		m_vertexBuffer->Unlock();
-
-		NativeShader_Imp* shader = nullptr;
-
-		// テクスチャの有無でシェーダーを選択
-		if (isMaterialMode)
-		{
-			auto material = (Material2D_Imp*) m_state.Material2DPtr;
-			auto command = material->GenerateShaderCommand();
-			
-			shader = command->GetShader();
-			auto& constantValues = command->GetConstantValues();
-			shader->SetConstantValues(constantValues.data(), constantValues.size());
-		}
-		else
-		{
-			if (m_state.TexturePtr != nullptr)
-			{
-				shader = m_shader.get();
 			}
 			else
 			{
-				shader = m_shader_nt.get();
+				if (e->Data.Sprite.IsLinearColor)
+				{
+					buf[ind + i].Color_.R = e->Data.Sprite.Colors[i].R;
+					buf[ind + i].Color_.G = e->Data.Sprite.Colors[i].G;
+					buf[ind + i].Color_.B = e->Data.Sprite.Colors[i].B;
+					buf[ind + i].Color_.A = e->Data.Sprite.Colors[i].A;
+				}
+				else
+				{
+					buf[ind + i].Color_.R = linearColorLookUpTable[e->Data.Sprite.Colors[i].R];
+					buf[ind + i].Color_.G = linearColorLookUpTable[e->Data.Sprite.Colors[i].G];
+					buf[ind + i].Color_.B = linearColorLookUpTable[e->Data.Sprite.Colors[i].B];
+					buf[ind + i].Color_.A = e->Data.Sprite.Colors[i].A;
+				}
 			}
-			shader->SetMatrix44("mat", mat);
 		}
 
-
-		// 描画
-		if (m_state.Material2DPtr == nullptr && m_state.TexturePtr != nullptr)
+		// マテリアルモードではシェーダーで行列計算をしないため、CPUで計算
+		if (isMaterialMode)
 		{
-			shader->SetTexture("g_texture", m_state.TexturePtr, m_state.Filter, m_state.Wrap, 0);
+			for (int32_t i = 0; i < 4; i++)
+			{
+				buf[ind + i].Position = mat.Transform3D(buf[ind + i].Position);
+			}
 		}
-		else if (m_state.Material2DPtr != nullptr && m_state.TexturePtr != nullptr)
-		{
-			shader->SetTexture("asdTexture", m_state.TexturePtr, m_state.Filter, m_state.Wrap, 0);
-		}
-
-		m_graphics->SetVertexBuffer(m_vertexBuffer.get());
-		m_graphics->SetIndexBuffer(m_indexBuffer.get());
-		m_graphics->SetShader(shader);
-
-		RenderState state;
-		
-		state.AlphaBlendState = m_state.AlphaBlendState;
-		state.DepthTest = false;
-		state.DepthWrite = false;
-		state.Culling = CullingType::Double;
-		m_graphics->SetRenderState(state);
-
-		m_graphics->DrawPolygon(m_drawingSprites.size() * 2);
-
-		m_drawingSprites.clear();
+		ind += 4;
 	}
 
+	m_vertexBuffer->Unlock();
 
-	void Renderer2D_Imp::DrawEffect()
+	NativeShader_Imp* shader = nullptr;
+
+	// テクスチャの有無でシェーダーを選択
+	if (isMaterialMode)
 	{
-		if (drawingEffects.size() == 0) return;
+		auto material = (Material2D_Imp*)m_state.Material2DPtr;
+		auto command = material->GenerateShaderCommand();
 
-		m_effectRenderer->BeginRendering();
-		
-		for (auto& e : drawingEffects)
+		shader = command->GetShader();
+		auto& constantValues = command->GetConstantValues();
+		shader->SetConstantValues(constantValues.data(), constantValues.size());
+	}
+	else
+	{
+		if (m_state.TexturePtr != nullptr)
 		{
-			m_effectManager->DrawHandle(e->Data.Effect.EffectHandle);
+			shader = m_shader.get();
 		}
-
-		m_effectRenderer->EndRendering();
-
-		// レンダー設定リセット
-		m_graphics->CommitRenderState(true);
-
-		drawingEffects.clear();
+		else
+		{
+			shader = m_shader_nt.get();
+		}
+		shader->SetMatrix44("mat", mat);
 	}
 
-	//----------------------------------------------------------------------------------
-	//
-	//----------------------------------------------------------------------------------
+	// 描画
+	if (m_state.Material2DPtr == nullptr && m_state.TexturePtr != nullptr && m_state.TexturePtr->GetLoadState() == LoadState::Loaded)
+	{
+		shader->SetTexture("g_texture", m_state.TexturePtr, m_state.Filter, m_state.Wrap, 0);
+	}
+	else if (m_state.Material2DPtr != nullptr && m_state.TexturePtr != nullptr && m_state.TexturePtr->GetLoadState() == LoadState::Loaded)
+	{
+		shader->SetTexture("asdTexture", m_state.TexturePtr, m_state.Filter, m_state.Wrap, 0);
+	}
 
+	m_graphics->SetVertexBuffer(m_vertexBuffer.get());
+	m_graphics->SetIndexBuffer(m_indexBuffer.get());
+	m_graphics->SetShader(shader);
+
+	RenderState state;
+
+	state.AlphaBlendState = m_state.AlphaBlendState;
+	state.DepthTest = false;
+	state.DepthWrite = false;
+	state.Culling = CullingType::Double;
+	m_graphics->SetRenderState(state);
+
+	m_graphics->DrawPolygon(m_drawingSprites.size() * 2);
+
+	m_drawingSprites.clear();
 }
+
+void Renderer2D_Imp::DrawEffect()
+{
+	if (drawingEffects.size() == 0)
+		return;
+
+	m_effectRenderer->BeginRendering();
+
+	for (auto& e : drawingEffects)
+	{
+		m_effectManager->DrawHandle(e->Data.Effect.EffectHandle);
+	}
+
+	m_effectRenderer->EndRendering();
+
+	// レンダー設定リセット
+	m_graphics->CommitRenderState(true);
+
+	drawingEffects.clear();
+}
+
+//----------------------------------------------------------------------------------
+//
+//----------------------------------------------------------------------------------
+
+} // namespace asd
